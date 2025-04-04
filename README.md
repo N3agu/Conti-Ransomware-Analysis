@@ -9,6 +9,9 @@ An in-depth analysis of the leaked Conti Ransomware source code and its Ransomwa
   - [Overview of Conti Ransomware](#overview-of-conti-ransomware)
   - [Most famous attacks](#most-famous-attacks)
   - [Evolution](#evolution)
+  - [The leak](#the-leak)
+- [Code Analysis](#code-analysis)
+  - [Version Timeline](#version-timeline)
 - [Credits](#credits)
 - [Disclaimer](#disclaimer)
 
@@ -38,8 +41,32 @@ Conti (often considered as the successor to Ryuk ransomware because it's derived
 
 Source: https://assets.sentinelone.com/ransomware-enterprise/conti-ransomware-unpacked
 
+### The leak
+In February 2022, during the onset of the Russian invasion of Ukraine, the Conti ransomware group publicly declared its support for Russia, threatening to retaliate against any cyberattacks on Russian infrastructure. In response, an anonymous individual, believed to support Ukraine, leaked a substantial collection of the group’s internal data. This included approximately 60,000 chat messages, as well as source code and other files used by the group. The leaked messages span from early 2020 through February 27, 2022. Most of the communications were direct messages sent via Jabber, and Conti's operations were coordinated using Rocket.Chat. The leak is fragmented, but it provides deep insight into the group's inner workings.
+
+Source: https://en.wikipedia.org/wiki/Conti_(ransomware)
+
+# Code Analysis
+### Version Timeline
+A summarized list of all the major Conti milestones was released by SentinelOne:
+
+| Variant       | Date           | Features / Updates |
+|---------------|----------------|--------------------|
+| A1a, A1b, A1c, A2 | 2019/10/06 | - Limited imports at load-time<br>- API names XOR-encoded with 0x99 |
+| B1, B2        | 2019/11/29     | - API names now XOR-encoded with 0x0F<br>- All imports loaded at runtime<br>- 32 threads for file encryption<br>- Parallelized drive encryption<br>- Improved stability during file writing |
+| C1, C2        | 2020/06/04     | - Custom string obfuscation replaces simple XOR<br>- Mutex created to prevent multiple infections<br>- Command-line options for encryption mode and network locations<br>- 36 fewer services are stopped |
+| D1a, D1b, D1c | 2020/09/02     | - API hashing with Murmur2A (seed 0x5B2D)<br>- Imports cached in a single array<br>- Logging and directory-targeting options added<br>- Ransom note moved from `.rsrs` to `.data`<br>- Shadow copies deleted via `wmic`<br>- Threads based on CPU count and execution mode<br>- New file encryption logic with full/partial modes<br>- Only one thread used to search shares<br>- Port checks before share querying |
+| E1–E6         | 2020/10–12     | - Ransom note expanded with contact info & UUID<br>- Logging errors now supported via CLI<br>- Added single-directory encryption mode<br>- Dead code and busy loops to hinder analysis |
+| F1, F2        | 2021/01–02     | - Optional mutex creation via CLI<br>- Switched from IoCompletionPorts to C++ queues/locks<br>- Murmur seed updated to 0xB801FCDA |
+| G1, G2        | 2021/03–04     | - Uses `PathIsDirectoryW` to distinguish files from folders<br>- Murmur seed changed to 0xFF889912 |
+
+Source: https://assets.sentinelone.com/ransomware-enterprise/conti-ransomware-unpacked
+
+The builder, locker and decryptor variants I will analyze are [available here](https://github.com/gharty03/Conti-Ransomware).
+
 # Credits
 - [vxUnderground](https://vx-underground.org/) for [samples, chat logs and much more](https://vx-underground.org/Samples)
+- [SentinelOne](https://www.sentinelone.com/) for [CONTI UNPACKED: UNDERSTANDING RANSOMWARE DEVELOPMENT AS A RESPONSE TO DETECTION – A DETAILED TECHNICAL ANALYSIS](https://assets.sentinelone.com/ransomware-enterprise/conti-ransomware-unpacked)
 - [gharty03](https://github.com/gharty03) for [Conti-Ransomware](https://github.com/gharty03/Conti-Ransomware)
 - [ForbiddenProgrammer](https://github.com/ForbiddenProgrammer) for [conti-pentester-guide-leak](https://github.com/ForbiddenProgrammer/conti-pentester-guide-leak)
 
