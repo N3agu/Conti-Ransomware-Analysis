@@ -105,7 +105,7 @@ These headers provide:
 - Process whitelisting/killing
 
 #### 2. Global Variables
-```cpp
+```c
 STATIC STRING_LIST g_HostList;
 STATIC STRING_LIST g_PathList;
 STATIC process_killer::PID_LIST g_WhitelistPids;
@@ -129,12 +129,14 @@ Commented out in this version: `-prockiller` and `-pids`
 The ransomware reads config from command-line args or files.
 
 #### 4. Config Parsing Functions
-`ParseFile(LPCWSTR FilePath, PSTRING_LIST List)`
+```cpp
+ParseFile(LPCWSTR FilePath, PSTRING_LIST List)
+```
 This function reads newline-delimited strings (paths/hostnames) from a file and stores them in a TAILQ list. Used for:
 - Target folders (-p)
 - Remote hosts (-h)
 
-<details><summary>Custom std::stoi() implementation called my_stoi() for safely converting strings to integers.</summary>
+<details open><summary>Custom std::stoi() implementation called my_stoi() for safely converting strings to integers.</summary>
 
 ```cpp
 STATIC int my_stoi(char* str) {
