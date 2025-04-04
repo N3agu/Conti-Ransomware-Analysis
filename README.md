@@ -7,11 +7,13 @@ An in-depth analysis of the leaked Conti Ransomware source code and its Ransomwa
 - [Introduction](#introduction)
   - [What is Ransomware-as-a-Service (RaaS)](#what-is-ransomware-as-a-service-raas)
   - [Overview of Conti Ransomware](#overview-of-conti-ransomware)
-  - [Most famous attacks](#most-famous-attacks)
+  - [Most Famous Attacks](#most-famous-attacks)
   - [Evolution](#evolution)
-  - [The leak](#the-leak)
+  - [The Leak](#the-leak)
 - [Code Analysis](#code-analysis)
   - [Version Timeline](#version-timeline)
+  - [File Architecture Overview](#file-architecture-overview)
+  - [Analysis of main.cpp](#analysis-of-maincpp)
 - [Credits](#credits)
 - [Disclaimer](#disclaimer)
 
@@ -22,7 +24,7 @@ Ransomware-as-a-Service (RaaS) is a cybercrime business model where ransomware d
 ### Overview of Conti Ransomware
 Conti (often considered as the successor to Ryuk ransomware because it's derived from the same codebase and relies on the same TrickBot infrastructure) is a ransomware strain that first appeared in December 2019, attributed to the Russia-based hacking group "Wizard Spider" (developed and maintained by the so-called TrickBot gang). It operates as a RaaS platform, allowing various threat actors to conduct ransomware attacks using its infrastructure. Once deployed, Conti not only encrypts data on infected devices but also spreads laterally across networks, enhancing its impact.
 
-### Most famous attacks
+### Most Famous Attacks
 1. Irish Health Service Executive (HSE): In May 2021, the Conti group attacked Ireland’s national healthcare system, causing widespread disruption and forcing the HSE to shut down many of its IT systems. The attackers demanded a ransom of $20 million in exchange for the decryption key.
 2. AXA Group: In June 2021, the French insurance company AXA Group suffered a ransomware attack by the Conti group, which resulted in the theft of sensitive customer data. The group demanded a ransom of $300 million in exchange for the data and threatened to release the data if the ransom was not paid.
 3. University of Utah: In July 2020, the Conti group targeted the University of Utah and demanded a ransom of $457,059 in exchange for the decryption key. The attack disrupted the university’s computer systems, including email and online coursework, causing significant disruption to students and faculty.
@@ -41,7 +43,7 @@ Conti (often considered as the successor to Ryuk ransomware because it's derived
 
 Source: https://assets.sentinelone.com/ransomware-enterprise/conti-ransomware-unpacked
 
-### The leak
+### The Leak
 In February 2022, during the onset of the Russian invasion of Ukraine, the Conti ransomware group publicly declared its support for Russia, threatening to retaliate against any cyberattacks on Russian infrastructure. In response, an anonymous individual, believed to support Ukraine, leaked a substantial collection of the group’s internal data. This included approximately 60,000 chat messages, as well as source code and other files used by the group. The leaked messages span from early 2020 through February 27, 2022. Most of the communications were direct messages sent via Jabber, and Conti's operations were coordinated using Rocket.Chat. The leak is fragmented, but it provides deep insight into the group's inner workings.
 
 Source: https://en.wikipedia.org/wiki/Conti_(ransomware)
@@ -63,6 +65,120 @@ A summarized list of all the major Conti milestones was released by SentinelOne:
 Source: https://assets.sentinelone.com/ransomware-enterprise/conti-ransomware-unpacked
 
 The builder, locker and decryptor variants I will analyze are [available here](https://github.com/gharty03/Conti-Ransomware).
+
+### File Architecture Overview
+#### Locker
+- `locker/`: Directory contains the core components responsible for the encryption process. Notable files are:
+  - `chacha20/`: Directory containing files related to the ChaCha20 encryption algorithm (Contains `chacha.c`, `chacha.h`, `ecrypt-config.h`, `ecrypt-machine.h`, `ecrypt-portable.h` and `ecrypt-sync.h`)
+  - `antihook/`: Contains `antihooks.h` (which defines removeHooks(), seems like antihooks.c/cpp is missing)
+  - `network_scanner.cpp`: Implements functionality to scan the network for shared folders and accessible network locations to propagate the ransomware
+  - `threadpool.cpp`: Implements a thread pool to manage concurrent tasks efficiently during the encryption process
+  - `disks.cpp`: Handles disk operations, including enumeration of disk drives and partitions
+  - `memory.cpp`: Manage memory allocation and deallocation routines during encryption
+  - `search.cpp`: Implements search functions to locate target files for encryption (also contains the list of blacklisted extensions: .exe, .dll, .lnk, .sys, .msi, R3ADM3.txt and CONTI_LOG.txt)
+  - `main.cpp`: The entry point of the program
+#### Decryptor
+Both the decryptor and the locker contain their own implementation of ChaCha20, suggesting that encryption and decryption processes are handled separately.
+
+### Analysis of main.cpp
+This file is the entry point and controller of the ransomware execution. It parses command-line arguments, initializes critical components, configures encryption settings, and manages the local and network file search and encryption process.
+
+#### 1. Header Inclusions
+```cpp
+#include "common.h"
+#include "filesystem.h"
+#include "network_scanner.h"
+#include "threadpool.h"
+#include "global_parameters.h"
+#include "locker.h"
+#include "api.h"
+#include "logs.h"
+#include "process_killer.h"
+```
+These headers provide:
+- API hooking/disabling
+- Filesystem enumeration
+-Encryption
+- Network share scanning
+- Logging
+- Multithreading/thread pool management
+- Process whitelisting/killing
+
+#### 2. Global Variables
+```cpp
+STATIC STRING_LIST g_HostList;
+STATIC STRING_LIST g_PathList;
+STATIC process_killer::PID_LIST g_WhitelistPids;
+STATIC INT g_EncryptMode = ALL_ENCRYPT;
+```
+These store:
+- A list of hostnames to scan for network encryption
+- A list of paths to encrypt
+- A whitelist of process IDs to avoid during encryption
+- The current encryption mode: all, local, net, or backups
+
+#### 3. Command Parsing
+Key flags:
+- `-h <hostfile>`: List of remote hosts to scan
+- `-p <pathfile>`: File paths to encrypt
+- `-m <mode>`: all, local, net, backups
+- `-log enabled`: Enables event logging
+
+Commented out in this version: `-prockiller` and `-pids`
+
+The ransomware reads config from command-line args or files.
+
+#### 4. Config Parsing Functions
+`ParseFile(LPCWSTR FilePath, PSTRING_LIST List)`
+This function reads newline-delimited strings (paths/hostnames) from a file and stores them in a TAILQ list. Used for:
+- Target folders (-p)
+- Remote hosts (-h)
+
+<details><summary>Custom std::stoi() implementation called my_stoi() for safely converting strings to integers.</summary>
+
+```cpp
+STATIC int my_stoi(char* str) {
+	unsigned int strLen = 0;
+	unsigned int i = 0;
+	while (str[i] != '\0') {
+		strLen += 1;
+		i++;
+	}
+
+	int num = 0;
+	int ten;
+	BOOL signFlag = TRUE; //true: +, false: -
+	for (i = 0; i < strLen; i++) {
+		if (str[i] < '0' || str[i] > '9') {
+			if (i == 0 && str[i] == '-') {
+				signFlag = FALSE;
+				continue;
+			}
+			if (i == 0 && str[i] == '+') {
+				signFlag = TRUE;
+				continue;
+			}
+
+			return 0;
+		}
+
+		ten = 1;
+		for (unsigned int j = 0; j < strLen - 1 - i; j++) {
+			ten *= 10;
+		}
+
+		num += ten * (str[i] - '0');
+	}
+
+	if (signFlag) {
+		return num;
+	}
+	else {
+		return -num;
+	}
+}
+```
+</details>
 
 # Credits
 - [vxUnderground](https://vx-underground.org/) for [samples, chat logs and much more](https://vx-underground.org/Samples)
